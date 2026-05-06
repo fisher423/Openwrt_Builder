@@ -157,8 +157,8 @@ elif [[ "$WORKFLOW_NAME" == "GL-MT5000" ]]; then
 # --- 逻辑块 6: 处理 jdcloud_re-ss-01 ---
 elif [[ "$WORKFLOW_NAME" == "jdcloud_re-ss-01" ]]; then
     echo ">>> 检测到设备: $WORKFLOW_NAME。开始执行 jdcloud_re-ss-01 的特定修改"
-    sed -i 's/192.168.1.1/192.168.100.1/g' package/base-files/files/bin/config_generate
-    echo "jdcloud_re-ss-01 IP 修改为 192.168.100.1"
+    sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
+    echo "jdcloud_re-ss-01 IP 修改为 192.168.31.1"
     
     echo ">>> 开始从 ImmortalWrt 注入 jdcloud_re-ss-01 设备支持..."
     chmod +x $GITHUB_WORKSPACE/sh/inject-device-support.sh
