@@ -164,6 +164,11 @@ elif [[ "$WORKFLOW_NAME" == "jdcloud_re-ss-01" ]]; then
     chmod +x $GITHUB_WORKSPACE/sh/inject-device-support.sh
     $GITHUB_WORKSPACE/sh/inject-device-support.sh
     echo ">>> jdcloud_re-ss-01 设备支持注入完成"
+    
+    echo ">>> 开始修复 qualcommax 补丁兼容性问题..."
+    chmod +x $GITHUB_WORKSPACE/sh/fix-patches.sh
+    $GITHUB_WORKSPACE/sh/fix-patches.sh
+    echo ">>> 补丁兼容性修复完成"
 else
     echo ">>> 未匹配到任何已知的 WORKFLOW_NAME ('$WORKFLOW_NAME')。跳过所有设备特定的修改"
 fi
