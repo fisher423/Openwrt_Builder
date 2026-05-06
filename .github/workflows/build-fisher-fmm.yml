@@ -26,7 +26,7 @@ jobs:
       matrix:
         include:
           - device: jdcloud_re-ss-01
-            repo_url: 'https://github.com/fisher423/fanchmwrt'
+            repo_url: 'https://github.com/fisher423/fanchmwrt.git'
             repo_branch: 'trae/solo-agent-Elg6jh'
             config_file: './config/jdcloud_re-ss-01.config'
             workflow_name: 'jdcloud_re-ss-01'
