@@ -1,4 +1,4 @@
-name: Build jdcloud_re-ss-01 Device
+name: Build jdcloud_re-ss-01 -fisher-fmm-6.18
 
 on:
   schedule:
