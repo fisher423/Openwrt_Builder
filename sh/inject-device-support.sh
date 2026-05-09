@@ -59,15 +59,55 @@ if [ -d "target/linux/qualcommax/ipq60xx" ]; then
     fi
 fi
 
+DTS_COPIED=0
+
 if [ -d "target/linux/qualcommax/dts" ]; then
     mkdir -p "$TARGET_DIR/dts"
-    for dts_file in target/linux/qualcommax/dts/*jdcloud*; do
+    for dts_file in $(find target/linux/qualcommax/dts -type f \( -name "*jdcloud*" -o -name "*re-ss*" -o -name "*re-cs*" \) 2>/dev/null); do
         if [ -f "$dts_file" ]; then
-            cp -f "$dts_file" "$TARGET_DIR/dts/"
-            echo -e "${GREEN}  ✅ 已复制 DTS: $(basename $dts_file)${NC}"
+            rel_path="${dts_file#target/linux/qualcommax/dts/}"
+            mkdir -p "$TARGET_DIR/dts/$(dirname "$rel_path")"
+            cp -f "$dts_file" "$TARGET_DIR/dts/$rel_path"
+            echo -e "${GREEN}  ✅ 已复制 DTS: $rel_path${NC}"
+            DTS_COPIED=1
         fi
     done
-    echo -e "${YELLOW}  ⚠️  DTS 目录中可能存在对其他 DTS 的 include 依赖，如编译报错需手动补全${NC}"
+fi
+
+if [ -d "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom" ]; then
+    for dts_file in target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*jdcloud* \
+                     target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*re-ss* \
+                     target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*re-cs*; do
+        if [ -f "$dts_file" ]; then
+            dts_basename=$(basename "$dts_file")
+            mkdir -p "$TARGET_DIR/dts/qcom"
+            cp -f "$dts_file" "$TARGET_DIR/dts/qcom/"
+            echo -e "${GREEN}  ✅ 已复制 DTS (from files/): qcom/$dts_basename${NC}"
+            DTS_COPIED=1
+        fi
+    done
+fi
+
+if [ "$DTS_COPIED" -eq 0 ]; then
+    echo -e "${YELLOW}  ⚠️  未在 ImmortalWrt 中找到 jdcloud DTS，尝试从 coolsnowwolf/lede 下载...${NC}"
+    mkdir -p "$TARGET_DIR/dts/qcom"
+
+    LEDE_DTS_BASE="https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/qualcommax/files/arch/arm64/boot/dts/qcom"
+
+    curl -fL "$LEDE_DTS_BASE/ipq6000-re-ss-01.dts" \
+        -o "$TARGET_DIR/dts/qcom/ipq6000-re-ss-01.dts" 2>/dev/null && \
+        echo -e "${GREEN}  ✅ 已下载 DTS: qcom/ipq6000-re-ss-01.dts${NC}" && DTS_COPIED=1 || \
+        echo -e "${RED}  ❌ 下载 ipq6000-re-ss-01.dts 失败${NC}"
+
+    curl -fL "$LEDE_DTS_BASE/ipq6010-re-cs-02.dts" \
+        -o "$TARGET_DIR/dts/qcom/ipq6010-re-cs-02.dts" 2>/dev/null && \
+        echo -e "${GREEN}  ✅ 已下载 DTS: qcom/ipq6010-re-cs-02.dts${NC}" || true
+fi
+
+if [ "$DTS_COPIED" -eq 0 ]; then
+    echo -e "${RED}  ❌ 未能获取 jdcloud DTS 文件，构建可能失败${NC}"
+else
+    echo -e "${YELLOW}  ⚠️  DTS 可能存在 include 依赖（.dtsi），如编译报错需手动补全${NC}"
 fi
 
 if [ -d "target/linux/qualcommax/image" ]; then
