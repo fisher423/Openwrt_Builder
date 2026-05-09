@@ -1,9 +1,11 @@
 #!/bin/bash
 
 # ============================================================
-# 脚本功能：从 ImmortalWrt 注入 jdcloud_re-ss-01 设备支持
-# 使用方法：在 fanchmwrt 源码目录中执行此脚本
-# 注意：仅复制设备特定文件，不覆盖补丁和内核配置
+# 脚本功能：从 ImmortalWrt 注入 jdcloud_re-ss-01 设备支持到 fanchmwrt
+# 核心原则：
+#   1. 绝不覆盖 fanchmwrt 已有文件，仅增量追加
+#   2. DTS 文件放入 files/ 覆盖目录（fanchmwrt 方式），不用 dts/ 目录（ImmortalWrt 方式）
+#   3. 主动检测并移除 DTS_DIR 覆盖，避免 qcom/qcom 双重路径
 # ============================================================
 
 set -e
@@ -27,7 +29,7 @@ TEMP_DIR="/tmp/immortalwrt-device-inject"
 rm -rf "$TEMP_DIR"
 mkdir -p "$TEMP_DIR"
 
-echo -e "${YELLOW}[1/5] 克隆 ImmortalWrt 源码（仅 target/linux/qualcommax）...${NC}"
+echo -e "${YELLOW}[1/7] 克隆 ImmortalWrt 源码...${NC}"
 
 cd "$TEMP_DIR"
 git clone -b "$IMMORTALWRT_BRANCH" "$IMMORTALWRT_URL" --single-branch --depth 1 --filter=blob:none immortalwrt-temp 2>/dev/null || \
@@ -35,144 +37,51 @@ git clone -b "$IMMORTALWRT_BRANCH" "$IMMORTALWRT_URL" --single-branch --depth 1 
 
 cd immortalwrt-temp
 
-git sparse-checkout set target/linux/qualcommax 2>/dev/null || true
+git sparse-checkout set target/linux/qualcommax package/firmware/ipq-wifi 2>/dev/null || true
 git checkout 2>/dev/null || true
 
+IWRT_DIR="$TEMP_DIR/immortalwrt-temp"
 TARGET_DIR="$OPENWRT_DIR/target/linux/qualcommax"
 mkdir -p "$TARGET_DIR"
 
-echo -e "${YELLOW}[2/5] 复制 jdcloud_re-ss-01 设备特定文件（DTS、image、wifi board）...${NC}"
+echo -e "${YELLOW}[2/7] 合并 base-files（不覆盖已有文件）...${NC}"
 
-DEVICE_NAME="jdcloud_re-ss-01"
-
-if [ -d "target/linux/qualcommax/ipq60xx" ]; then
-    mkdir -p "$TARGET_DIR/ipq60xx"
-
-    if [ -d "target/linux/qualcommax/ipq60xx/base-files" ]; then
-        cp -rf target/linux/qualcommax/ipq60xx/base-files "$TARGET_DIR/ipq60xx/"
-        echo -e "${GREEN}  ✅ 已复制 ipq60xx/base-files${NC}"
-    fi
-
-    if [ -f "target/linux/qualcommax/ipq60xx/target.mk" ]; then
-        cp -f target/linux/qualcommax/ipq60xx/target.mk "$TARGET_DIR/ipq60xx/"
-        echo -e "${GREEN}  ✅ 已复制 ipq60xx/target.mk${NC}"
-    fi
-fi
-
-DTS_COPIED=0
-
-if [ -d "target/linux/qualcommax/dts" ]; then
-    mkdir -p "$TARGET_DIR/dts"
-    for dts_file in $(find target/linux/qualcommax/dts -type f \( -name "*jdcloud*" -o -name "*re-ss*" -o -name "*re-cs*" \) 2>/dev/null); do
-        if [ -f "$dts_file" ]; then
-            rel_path="${dts_file#target/linux/qualcommax/dts/}"
-            mkdir -p "$TARGET_DIR/dts/$(dirname "$rel_path")"
-            cp -f "$dts_file" "$TARGET_DIR/dts/$rel_path"
-            echo -e "${GREEN}  ✅ 已复制 DTS: $rel_path${NC}"
-            DTS_COPIED=1
+if [ -d "$IWRT_DIR/target/linux/qualcommax/ipq60xx/base-files" ]; then
+    mkdir -p "$TARGET_DIR/ipq60xx/base-files"
+    cd "$IWRT_DIR/target/linux/qualcommax/ipq60xx/base-files"
+    find . -type f | while read -r file; do
+        dest="$TARGET_DIR/ipq60xx/base-files/$file"
+        if [ ! -f "$dest" ]; then
+            mkdir -p "$(dirname "$dest")"
+            cp -f "$file" "$dest"
+            echo -e "${GREEN}  ✅ 新增: $file${NC}"
         fi
     done
-fi
-
-if [ -d "target/linux/qualcommax/files/arch/arm64/boot/dts/qcom" ]; then
-    for dts_file in target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*jdcloud* \
-                     target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*re-ss* \
-                     target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/*re-cs*; do
-        if [ -f "$dts_file" ]; then
-            dts_basename=$(basename "$dts_file")
-            mkdir -p "$TARGET_DIR/dts/qcom"
-            cp -f "$dts_file" "$TARGET_DIR/dts/qcom/"
-            echo -e "${GREEN}  ✅ 已复制 DTS (from files/): qcom/$dts_basename${NC}"
-            DTS_COPIED=1
-        fi
-    done
-fi
-
-if [ "$DTS_COPIED" -eq 0 ]; then
-    echo -e "${YELLOW}  ⚠️  未在 ImmortalWrt 中找到 jdcloud DTS，尝试从 coolsnowwolf/lede 下载...${NC}"
-    mkdir -p "$TARGET_DIR/dts/qcom"
-
-    LEDE_DTS_BASE="https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/qualcommax/files/arch/arm64/boot/dts/qcom"
-
-    curl -fL "$LEDE_DTS_BASE/ipq6000-re-ss-01.dts" \
-        -o "$TARGET_DIR/dts/qcom/ipq6000-re-ss-01.dts" 2>/dev/null && \
-        echo -e "${GREEN}  ✅ 已下载 DTS: qcom/ipq6000-re-ss-01.dts${NC}" && DTS_COPIED=1 || \
-        echo -e "${RED}  ❌ 下载 ipq6000-re-ss-01.dts 失败${NC}"
-
-    curl -fL "$LEDE_DTS_BASE/ipq6010-re-cs-02.dts" \
-        -o "$TARGET_DIR/dts/qcom/ipq6010-re-cs-02.dts" 2>/dev/null && \
-        echo -e "${GREEN}  ✅ 已下载 DTS: qcom/ipq6010-re-cs-02.dts${NC}" || true
-fi
-
-if [ "$DTS_COPIED" -eq 0 ]; then
-    echo -e "${RED}  ❌ 未能获取 jdcloud DTS 文件，构建可能失败${NC}"
+    echo -e "${GREEN}  ✅ base-files 合并完成${NC}"
 else
-    echo -e "${YELLOW}  ⚠️  DTS 可能存在 include 依赖（.dtsi），如编译报错需手动补全${NC}"
+    echo -e "${YELLOW}  ⚠️  ImmortalWrt 中未找到 ipq60xx/base-files${NC}"
 fi
 
-if [ -d "target/linux/qualcommax/image" ]; then
-    mkdir -p "$TARGET_DIR/image"
-    if [ -f "target/linux/qualcommax/image/ipq60xx.mk" ]; then
-        cp -f target/linux/qualcommax/image/ipq60xx.mk "$TARGET_DIR/image/"
-        echo -e "${GREEN}  ✅ 已复制 image/ipq60xx.mk${NC}"
+echo -e "${YELLOW}[3/7] 增量添加 jdcloud_re-ss-01 设备定义到 ipq60xx.mk...${NC}"
 
-        echo -e "${YELLOW}  🔄 过滤 ipq60xx.mk，仅保留 jdcloud_re-ss-01 设备定义...${NC}"
-        FILTERED_FILE="$TARGET_DIR/image/ipq60xx.mk.filtered"
-        awk '
-        /^define Device\// {
-            in_device = 1
-            device_name = $0
-            sub(/^define Device\//, "", device_name)
-            if (device_name == "jdcloud_re-ss-01") {
-                keep_device = 1
-                print
-            } else {
-                keep_device = 0
-            }
-            next
-        }
-        in_device && /^endef/ {
-            in_device = 0
-            if (keep_device) print
-            next
-        }
-        in_device {
-            if (keep_device) print
-            next
-        }
-        /^TARGET_DEVICES \+= / {
-            target_dev = $0
-            sub(/^TARGET_DEVICES \+= /, "", target_dev)
-            if (target_dev == "jdcloud_re-ss-01") print
-            next
-        }
-        { print }
-        ' "$TARGET_DIR/image/ipq60xx.mk" > "$FILTERED_FILE"
+MK_FILE="$TARGET_DIR/image/ipq60xx.mk"
 
-        ORIGINAL_LINES=$(wc -l < "$TARGET_DIR/image/ipq60xx.mk")
-        FILTERED_LINES=$(wc -l < "$FILTERED_FILE")
-        mv "$FILTERED_FILE" "$TARGET_DIR/image/ipq60xx.mk"
-        echo -e "${GREEN}  ✅ 已过滤 ipq60xx.mk（${ORIGINAL_LINES} 行 → ${FILTERED_LINES} 行）${NC}"
+if [ -f "$MK_FILE" ]; then
+    if grep -q 'DTS_DIR.*:=.*qcom' "$MK_FILE"; then
+        echo -e "${RED}  ❌ 检测到 DTS_DIR 覆盖！这会导致 qcom/qcom 双重路径冲突${NC}"
+        echo -e "${YELLOW}  正在移除 DTS_DIR 覆盖...${NC}"
+        sed -i '/^DTS_DIR.*:=.*/d' "$MK_FILE"
+        if ! grep -q 'DTS_DIR.*:=.*qcom' "$MK_FILE"; then
+            echo -e "${GREEN}  ✅ 已移除 DTS_DIR 覆盖${NC}"
+        else
+            echo -e "${RED}  ❌ 移除 DTS_DIR 覆盖失败${NC}"
+        fi
     fi
-fi
 
-WIFI_BOARD_DIR="$OPENWRT_DIR/package/firmware/ipq-wifi"
-mkdir -p "$WIFI_BOARD_DIR"
-for board_file in "$TEMP_DIR/immortalwrt-temp/package/firmware/ipq-wifi/board-"*jdcloud*; do
-    if [ -f "$board_file" ]; then
-        cp -f "$board_file" "$WIFI_BOARD_DIR/"
-        echo -e "${GREEN}  ✅ 已复制 wifi board: $(basename $board_file)${NC}"
-    fi
-done
-
-echo -e "${YELLOW}[3/5] 检查并修复设备配置...${NC}"
-
-if [ -f "$TARGET_DIR/image/ipq60xx.mk" ]; then
-    if grep -q "jdcloud_re-ss-01" "$TARGET_DIR/image/ipq60xx.mk"; then
+    if grep -q "define Device/jdcloud_re-ss-01" "$MK_FILE"; then
         echo -e "${GREEN}  ✅ jdcloud_re-ss-01 设备定义已存在${NC}"
     else
-        echo -e "${RED}  ❌ 未找到 jdcloud_re-ss-01 设备定义，尝试手动添加...${NC}"
-        cat >> "$TARGET_DIR/image/ipq60xx.mk" << 'EOF'
+        cat >> "$MK_FILE" << 'EOF'
 
 define Device/jdcloud_re-ss-01
 	$(call Device/FitImage)
@@ -186,26 +95,138 @@ define Device/jdcloud_re-ss-01
 endef
 TARGET_DEVICES += jdcloud_re-ss-01
 EOF
-        echo -e "${GREEN}  ✅ 已添加 jdcloud_re-ss-01 设备定义${NC}"
+        echo -e "${GREEN}  ✅ 已追加 jdcloud_re-ss-01 设备定义${NC}"
     fi
 else
-    echo -e "${RED}  ❌ 未找到 ipq60xx.mk 文件${NC}"
+    echo -e "${RED}  ❌ 未找到 ipq60xx.mk: $MK_FILE${NC}"
 fi
 
-if [ ! -f "$TARGET_DIR/ipq60xx/target.mk" ]; then
-    mkdir -p "$TARGET_DIR/ipq60xx"
-    cat > "$TARGET_DIR/ipq60xx/target.mk" << 'EOF'
-SUBTARGET:=ipq60xx
-BOARDNAME:=Qualcomm Atheros IPQ60xx
-DEFAULT_PACKAGES += ath11k-firmware-ipq6018
-define Target/Description
-	Build firmware images for Qualcomm Atheros IPQ60xx based boards.
-endef
-EOF
-    echo -e "${GREEN}  ✅ 已创建 ipq60xx/target.mk${NC}"
+echo -e "${YELLOW}[4/7] 复制 DTS 和 DTSI 文件到 files/ 覆盖目录...${NC}"
+
+DTS_DEST_DIR="$TARGET_DIR/files/arch/arm64/boot/dts/qcom"
+mkdir -p "$DTS_DEST_DIR"
+
+DTS_FILE="ipq6000-re-ss-01.dts"
+DTS_SRC="$IWRT_DIR/target/linux/qualcommax/dts/$DTS_FILE"
+
+if [ -f "$DTS_DEST_DIR/$DTS_FILE" ]; then
+    echo -e "${GREEN}  ✅ DTS 已存在: $DTS_FILE${NC}"
+elif [ -f "$DTS_SRC" ]; then
+    cp -f "$DTS_SRC" "$DTS_DEST_DIR/$DTS_FILE"
+    echo -e "${GREEN}  ✅ 已复制 DTS: $DTS_FILE${NC}"
+else
+    echo -e "${YELLOW}  ⚠️  sparse checkout 中未找到 $DTS_FILE，从 GitHub 下载...${NC}"
+    DTS_URL="https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/target/linux/qualcommax/dts/$DTS_FILE"
+    if curl -fsSL "$DTS_URL" -o "$DTS_DEST_DIR/$DTS_FILE" 2>/dev/null; then
+        echo -e "${GREEN}  ✅ 已下载 DTS: $DTS_FILE${NC}"
+    else
+        echo -e "${RED}  ❌ 无法获取 DTS: $DTS_FILE${NC}"
+    fi
 fi
 
-echo -e "${YELLOW}[4/5] 补全 ipq60xx 内核配置（仅追加缺失选项）...${NC}"
+DTSI_FILES=("ipq6018-512m.dtsi" "ipq6018-ess.dtsi")
+DTSI_SRC_DIR="$IWRT_DIR/target/linux/qualcommax/files/arch/arm64/boot/dts/qcom"
+
+for dtsi_file in "${DTSI_FILES[@]}"; do
+    dest="$DTS_DEST_DIR/$dtsi_file"
+    src="$DTSI_SRC_DIR/$dtsi_file"
+
+    if [ -f "$dest" ]; then
+        echo -e "${GREEN}  ✅ DTSI 已存在: $dtsi_file${NC}"
+    elif [ -f "$src" ]; then
+        cp -f "$src" "$dest"
+        echo -e "${GREEN}  ✅ 已复制 DTSI: $dtsi_file${NC}"
+    else
+        echo -e "${YELLOW}  ⚠️  sparse checkout 中未找到 $dtsi_file，从 GitHub 下载...${NC}"
+        dtsi_url="https://raw.githubusercontent.com/immortalwrt/immortalwrt/master/target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/$dtsi_file"
+        if curl -fsSL "$dtsi_url" -o "$dest" 2>/dev/null; then
+            echo -e "${GREEN}  ✅ 已下载 DTSI: $dtsi_file${NC}"
+        else
+            echo -e "${RED}  ❌ 无法获取 DTSI: $dtsi_file${NC}"
+        fi
+    fi
+done
+
+echo -e "${YELLOW}[5/7] 补丁 ipq-wifi Makefile 并添加 board 文件...${NC}"
+
+IPQ_WIFI_MAKEFILE=""
+if [ -f "$OPENWRT_DIR/package/firmware/ipq-wifi/Makefile" ]; then
+    IPQ_WIFI_MAKEFILE="$OPENWRT_DIR/package/firmware/ipq-wifi/Makefile"
+elif [ -f "$OPENWRT_DIR/feeds/packages/firmware/ipq-wifi/Makefile" ]; then
+    IPQ_WIFI_MAKEFILE="$OPENWRT_DIR/feeds/packages/firmware/ipq-wifi/Makefile"
+fi
+
+if [ -n "$IPQ_WIFI_MAKEFILE" ]; then
+    if grep -q "jdcloud_re-ss-01" "$IPQ_WIFI_MAKEFILE"; then
+        echo -e "${GREEN}  ✅ ipq-wifi Makefile 已包含 jdcloud_re-ss-01${NC}"
+    else
+        IPQ_WIFI_MK="$IPQ_WIFI_MAKEFILE" python3 << 'PYEOF'
+import os
+makefile = os.environ['IPQ_WIFI_MK']
+with open(makefile, 'r') as f:
+    content = f.read()
+
+if 'jdcloud_re-ss-01' not in content:
+    lines = content.split('\n')
+    new_lines = []
+    for line in lines:
+        if line.startswith('ALLWIFIPACKAGES'):
+            if new_lines and not new_lines[-1].rstrip().endswith('\\'):
+                new_lines[-1] = new_lines[-1].rstrip() + ' \\'
+            new_lines.append('\tjdcloud_re-ss-01')
+        new_lines.append(line)
+    content = '\n'.join(new_lines)
+
+    content = content.rstrip('\n') + '\n$(eval $(call generate-ipq-wifi-package,jdcloud_re-ss-01,JDCloud RE-SS-01))\n'
+
+    if 'define Build/Prepare' not in content:
+        content = content.replace(
+            'define Build/Compile',
+            'define Build/Prepare\n\t$(call Build/Prepare/Default)\n\t$(CP) ./board-jdcloud_re-ss-01.ipq6018 $(PKG_BUILD_DIR)/ 2>/dev/null || true\nendef\n\ndefine Build/Compile'
+        )
+
+    with open(makefile, 'w') as f:
+        f.write(content)
+PYEOF
+        echo -e "${GREEN}  ✅ 已添加 jdcloud_re-ss-01 到 ipq-wifi Makefile${NC}"
+    fi
+
+    IPQ_WIFI_DIR="$(dirname "$IPQ_WIFI_MAKEFILE")"
+    BOARD_FILE="board-jdcloud_re-ss-01.ipq6018"
+
+    if [ -f "$IPQ_WIFI_DIR/$BOARD_FILE" ]; then
+        echo -e "${GREEN}  ✅ board 文件已存在: $BOARD_FILE${NC}"
+    else
+        COPIED=0
+        for board_file in "$IWRT_DIR/package/firmware/ipq-wifi/board-"*jdcloud_re-ss-01*; do
+            if [ -f "$board_file" ]; then
+                cp -f "$board_file" "$IPQ_WIFI_DIR/"
+                echo -e "${GREEN}  ✅ 已复制 board: $(basename "$board_file")${NC}"
+                COPIED=1
+                break
+            fi
+        done
+
+        if [ "$COPIED" -eq 0 ]; then
+            echo -e "${YELLOW}  ⚠️  从 qca-wireless 仓库下载 board 文件...${NC}"
+            BOARD_URL="https://raw.githubusercontent.com/openwrt/firmware_qca-wireless/main/$BOARD_FILE"
+            if curl -fsSL "$BOARD_URL" -o "$IPQ_WIFI_DIR/$BOARD_FILE" 2>/dev/null; then
+                echo -e "${GREEN}  ✅ 已下载 board: $BOARD_FILE${NC}"
+            else
+                BOARD_URL="https://raw.githubusercontent.com/openwrt/firmware_qca-wireless/master/$BOARD_FILE"
+                if curl -fsSL "$BOARD_URL" -o "$IPQ_WIFI_DIR/$BOARD_FILE" 2>/dev/null; then
+                    echo -e "${GREEN}  ✅ 已下载 board: $BOARD_FILE${NC}"
+                else
+                    echo -e "${RED}  ❌ 无法下载 board: $BOARD_FILE${NC}"
+                fi
+            fi
+        fi
+    fi
+else
+    echo -e "${RED}  ❌ 未找到 ipq-wifi Makefile${NC}"
+fi
+
+echo -e "${YELLOW}[6/7] 补全 ipq60xx 内核配置...${NC}"
 
 CONFIG_FILE="$TARGET_DIR/ipq60xx/config-default"
 
@@ -224,7 +245,6 @@ REQUIRED_CONFIGS=(
     "# CONFIG_REGULATOR_CPR3_NPU is not set"
     "CONFIG_REGULATOR_CPR4_APSS=y"
     "CONFIG_REGULATOR_QCOM_SMD_RPM=y"
-    "# CONFIG_NF_CONNTRACK_DSCPREMARK_EXT is not set"
 )
 
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -232,43 +252,103 @@ if [ ! -f "$CONFIG_FILE" ]; then
     for config_line in "${REQUIRED_CONFIGS[@]}"; do
         echo "$config_line" >> "$CONFIG_FILE"
     done
-    echo -e "${GREEN}  ✅ 已创建 ipq60xx/config-default${NC}"
+    echo -e "${GREEN}  ✅ 已创建 config-default${NC}"
 else
     ADDED=0
     for config_line in "${REQUIRED_CONFIGS[@]}"; do
         config_key=$(echo "$config_line" | grep -oP 'CONFIG_\w+' || echo "$config_line" | sed 's/^# //' | sed 's/ is not set//')
         if ! grep -q "$config_key" "$CONFIG_FILE"; then
             echo "$config_line" >> "$CONFIG_FILE"
-            echo -e "${GREEN}  ✅ 已追加内核配置: $config_line${NC}"
+            echo -e "${GREEN}  ✅ 已追加: $config_line${NC}"
             ADDED=$((ADDED + 1))
         fi
     done
     if [ "$ADDED" -eq 0 ]; then
-        echo -e "${GREEN}  ✅ 内核配置完整，无需追加${NC}"
+        echo -e "${GREEN}  ✅ 内核配置完整${NC}"
     fi
 fi
 
-echo -e "${YELLOW}[5/5] 检查 qualcommax/Makefile...${NC}"
+echo -e "${YELLOW}[7/7] 验证注入结果...${NC}"
 
-if [ -f "$TARGET_DIR/Makefile" ]; then
-    if grep -q "ipq60xx" "$TARGET_DIR/Makefile"; then
-        echo -e "${GREEN}  ✅ qualcommax/Makefile 已包含 ipq60xx 子目标${NC}"
-    else
-        echo -e "${YELLOW}  ⚠️  qualcommax/Makefile 中未找到 ipq60xx，可能需要手动添加${NC}"
-    fi
+ERRORS=0
+
+if [ -f "$MK_FILE" ] && grep -q "define Device/jdcloud_re-ss-01" "$MK_FILE"; then
+    echo -e "${GREEN}  ✅ ipq60xx.mk 包含 jdcloud_re-ss-01${NC}"
 else
-    echo -e "${RED}  ❌ 未找到 qualcommax/Makefile 文件${NC}"
+    echo -e "${RED}  ❌ ipq60xx.mk 缺少 jdcloud_re-ss-01${NC}"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if [ -f "$MK_FILE" ] && grep -q 'DTS_DIR.*:=.*qcom' "$MK_FILE"; then
+    echo -e "${RED}  ❌ ipq60xx.mk 仍有 DTS_DIR 覆盖！将导致 qcom/qcom 双重路径${NC}"
+    echo -e "${YELLOW}  强制移除...${NC}"
+    sed -i '/^DTS_DIR.*:=.*/d' "$MK_FILE"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if [ -f "$DTS_DEST_DIR/ipq6000-re-ss-01.dts" ]; then
+    echo -e "${GREEN}  ✅ DTS: ipq6000-re-ss-01.dts${NC}"
+else
+    echo -e "${RED}  ❌ DTS 缺失: ipq6000-re-ss-01.dts${NC}"
+    ERRORS=$((ERRORS + 1))
+fi
+
+for dtsi_file in "${DTSI_FILES[@]}"; do
+    if [ -f "$DTS_DEST_DIR/$dtsi_file" ]; then
+        echo -e "${GREEN}  ✅ DTSI: $dtsi_file${NC}"
+    else
+        echo -e "${RED}  ❌ DTSI 缺失: $dtsi_file${NC}"
+        ERRORS=$((ERRORS + 1))
+    fi
+done
+
+if [ -n "$IPQ_WIFI_MAKEFILE" ] && grep -q "jdcloud_re-ss-01" "$IPQ_WIFI_MAKEFILE"; then
+    echo -e "${GREEN}  ✅ ipq-wifi Makefile 包含 jdcloud_re-ss-01${NC}"
+else
+    echo -e "${RED}  ❌ ipq-wifi Makefile 缺少 jdcloud_re-ss-01${NC}"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if [ -n "$IPQ_WIFI_MAKEFILE" ] && grep -q "define Build/Prepare" "$IPQ_WIFI_MAKEFILE"; then
+    echo -e "${GREEN}  ✅ ipq-wifi Makefile 包含 Build/Prepare 覆盖${NC}"
+else
+    echo -e "${YELLOW}  ⚠️  ipq-wifi Makefile 缺少 Build/Prepare 覆盖（board 文件可能无法安装）${NC}"
+fi
+
+if [ -n "$IPQ_WIFI_MAKEFILE" ]; then
+    IPQ_WIFI_DIR="$(dirname "$IPQ_WIFI_MAKEFILE")"
+    if [ -f "$IPQ_WIFI_DIR/board-jdcloud_re-ss-01.ipq6018" ]; then
+        echo -e "${GREEN}  ✅ board 文件: board-jdcloud_re-ss-01.ipq6018${NC}"
+    else
+        echo -e "${RED}  ❌ board 文件缺失: board-jdcloud_re-ss-01.ipq6018${NC}"
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
+if [ -f "$TARGET_DIR/ipq60xx/target.mk" ]; then
+    echo -e "${GREEN}  ✅ ipq60xx/target.mk 存在${NC}"
+else
+    echo -e "${RED}  ❌ ipq60xx/target.mk 缺失${NC}"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if [ -f "$TARGET_DIR/Makefile" ] && grep -q "ipq60xx" "$TARGET_DIR/Makefile"; then
+    echo -e "${GREEN}  ✅ qualcommax/Makefile 包含 ipq60xx${NC}"
+else
+    echo -e "${RED}  ❌ qualcommax/Makefile 缺少 ipq60xx${NC}"
+    ERRORS=$((ERRORS + 1))
 fi
 
 cd "$OPENWRT_DIR"
 rm -rf "$TEMP_DIR"
 
-echo -e "${GREEN}=============================================${NC}"
-echo -e "${GREEN}  ✅ jdcloud_re-ss-01 设备支持注入完成！${NC}"
-echo -e "${GREEN}=============================================${NC}"
 echo ""
-echo -e "现在可以使用以下配置进行编译："
-echo -e "  CONFIG_TARGET_qualcommax=y"
-echo -e "  CONFIG_TARGET_qualcommax_ipq60xx=y"
-echo -e "  CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y"
-echo ""
+if [ "$ERRORS" -gt 0 ]; then
+    echo -e "${RED}=============================================${NC}"
+    echo -e "${RED}  ❌ 注入完成，有 $ERRORS 个错误${NC}"
+    echo -e "${RED}=============================================${NC}"
+else
+    echo -e "${GREEN}=============================================${NC}"
+    echo -e "${GREEN}  ✅ jdcloud_re-ss-01 设备支持注入完成！${NC}"
+    echo -e "${GREEN}=============================================${NC}"
+fi
