@@ -75,6 +75,44 @@ if [ -d "target/linux/qualcommax/image" ]; then
     if [ -f "target/linux/qualcommax/image/ipq60xx.mk" ]; then
         cp -f target/linux/qualcommax/image/ipq60xx.mk "$TARGET_DIR/image/"
         echo -e "${GREEN}  ✅ 已复制 image/ipq60xx.mk${NC}"
+
+        echo -e "${YELLOW}  🔄 过滤 ipq60xx.mk，仅保留 jdcloud_re-ss-01 设备定义...${NC}"
+        FILTERED_FILE="$TARGET_DIR/image/ipq60xx.mk.filtered"
+        awk '
+        /^define Device\// {
+            in_device = 1
+            device_name = $0
+            sub(/^define Device\//, "", device_name)
+            if (device_name == "jdcloud_re-ss-01") {
+                keep_device = 1
+                print
+            } else {
+                keep_device = 0
+            }
+            next
+        }
+        in_device && /^endef/ {
+            in_device = 0
+            if (keep_device) print
+            next
+        }
+        in_device {
+            if (keep_device) print
+            next
+        }
+        /^TARGET_DEVICES \+= / {
+            target_dev = $0
+            sub(/^TARGET_DEVICES \+= /, "", target_dev)
+            if (target_dev == "jdcloud_re-ss-01") print
+            next
+        }
+        { print }
+        ' "$TARGET_DIR/image/ipq60xx.mk" > "$FILTERED_FILE"
+
+        ORIGINAL_LINES=$(wc -l < "$TARGET_DIR/image/ipq60xx.mk")
+        FILTERED_LINES=$(wc -l < "$FILTERED_FILE")
+        mv "$FILTERED_FILE" "$TARGET_DIR/image/ipq60xx.mk"
+        echo -e "${GREEN}  ✅ 已过滤 ipq60xx.mk（${ORIGINAL_LINES} 行 → ${FILTERED_LINES} 行）${NC}"
     fi
 fi
 
