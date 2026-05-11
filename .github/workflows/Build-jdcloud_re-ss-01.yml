@@ -8,7 +8,13 @@ on:
     workflows: ["Auto-Clean"]
     types:
       - completed  
+      
+name: Build jdcloud_re-ss-01 Device
 
+on:
+  schedule:
+    - cron: '0 2 */4 * *'  # 每4天执行一次
+  workflow_dispatch:  # 允许手动触发
 permissions:
   contents: write
 
