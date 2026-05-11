@@ -1,10 +1,6 @@
 name: Build jdcloud_re-ss-01 Device
 
 
-on:
-  schedule:
-    - cron: '0 2 */4 * *'
-  workflow_dispatch:
 #CI计划
 on:
   #自动编译：当Auto-Clean运行完成后
