@@ -1,0 +1,7 @@
+- [x] board 文件放在 `package/firmware/ipq-wifi/files/` 子目录（非包根目录）
+- [x] ipq-wifi Makefile 不包含自定义 Build/Prepare 覆盖
+- [x] 02_network 包含 `jdcloud,re-ss-01` 网络接口配置（lan1 lan2 lan3 / wan）
+- [x] platform.sh 包含 `jdcloud,re-ss-01` 升级支持
+- [x] bash -n 语法检查通过
+- [x] Python 补丁逻辑模拟验证通过
+- [x] 变更已提交到 main 分支
