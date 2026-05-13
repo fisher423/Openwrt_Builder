@@ -1,0 +1,3 @@
+- [x] inject-device-support.sh 内容与 58f9738 版本一致
+- [x] config/jdcloud_re-ss-01.config 保留 LuCI 插件配置
+- [x] 变更已提交到 main 分支
