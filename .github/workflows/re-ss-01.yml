@@ -1,4 +1,4 @@
-name: Build filogic
+name: RE-SS-01
 
 on:
   schedule:
